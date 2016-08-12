@@ -30,7 +30,7 @@ using System.Runtime.InteropServices;
 
 internal static class OVRPlugin
 {
-	public static readonly System.Version wrapperVersion = new System.Version(1, 5, 0);
+	public static readonly System.Version wrapperVersion = new System.Version(1, 6, 0);
 
 	private static System.Version _version;
 	public static System.Version version
@@ -121,7 +121,7 @@ internal static class OVRPlugin
 		public byte d7;
 	}
 
-	private enum Bool
+	public enum Bool
 	{
 		False = 0,
 		True
@@ -154,6 +154,18 @@ internal static class OVRPlugin
 		TrackerZero    = 5,
 		TrackerOne     = 6,
 		Count,
+	}
+
+	public enum Controller
+	{
+		None           = 0,
+		LTouch         = 0x00000001,
+		RTouch         = 0x00000002,
+		Touch          = LTouch | RTouch,
+		Remote         = 0x00000004,
+		Gamepad        = 0x00000008,
+		Active         = unchecked((int)0x80000000),
+		All            = ~None,
 	}
 
 	public enum TrackingOrigin
@@ -212,6 +224,13 @@ internal static class OVRPlugin
         Frequency,
 		SDKVersion,
     }
+
+	private enum OverlayFlag
+	{
+		None        = unchecked((int)0x00000000),
+		OnTop       = unchecked((int)0x00000001),
+		HeadLocked  = unchecked((int)0x00000002),
+	}
 
 	private enum Caps
 	{
@@ -328,6 +347,31 @@ internal static class OVRPlugin
 	}
 
 	[StructLayout(LayoutKind.Sequential)]
+	public struct HapticsBuffer
+	{
+		public IntPtr Samples;
+		public int SamplesCount;
+	}
+
+	[StructLayout(LayoutKind.Sequential)]
+	public struct HapticsState
+	{
+		public int SamplesAvailable;
+		public int SamplesQueued;
+	}
+
+	[StructLayout(LayoutKind.Sequential)]
+	public struct HapticsDesc
+	{
+		public int SampleRateHz;
+		public int SampleSizeInBytes;
+		public int MinimumSafeSamplesQueued;
+		public int MinimumBufferSamplesCount;
+		public int OptimalBufferSamplesCount;
+		public int MaximumBufferSamplesCount;
+	}
+
+	[StructLayout(LayoutKind.Sequential)]
 	public struct Sizei
 	{
 		public int w;
@@ -401,6 +445,21 @@ internal static class OVRPlugin
 		set { SetCap(Caps.Position, value); }
 	}
 
+	public static bool useIPDInPositionTracking
+	{
+		get {
+			if (version >= OVRP_1_6_0.version)
+				return OVRP_1_6_0.ovrp_GetTrackingIPDEnabled() == OVRPlugin.Bool.True;
+
+			return true;
+		}
+
+		set {
+			if (version >= OVRP_1_6_0.version)
+				OVRP_1_6_0.ovrp_SetTrackingIPDEnabled(ToBool(value));
+		}
+	}
+
 	public static bool positionSupported { get { return GetStatus(Status.PositionSupported); } }
 
 	public static bool positionTracked { get { return GetStatus(Status.PositionTracked); } }
@@ -419,6 +478,16 @@ internal static class OVRPlugin
 			else if (version >= OVRP_1_1_0.version)
 				return OVRP_1_1_0.ovrp_GetHeadphonesPresent() == OVRPlugin.Bool.True;
 			return true;
+		}
+	}
+
+	public static int recommendedMSAALevel
+	{
+		get {
+			if (version >= OVRP_1_6_0.version)
+				return OVRP_1_6_0.ovrp_GetSystemRecommendedMSAALevel ();
+			else
+				return 2;
 		}
 	}
 
@@ -672,8 +741,22 @@ internal static class OVRPlugin
 	public static Frustumf GetTrackerFrustum(Tracker trackerId) { return OVRP_0_1_0.ovrp_GetTrackerFrustum(trackerId); }
 	public static bool DismissHSW() { return OVRP_0_1_0.ovrp_DismissHSW() == Bool.True; }
 	public static bool ShowUI(PlatformUI ui) { return OVRP_0_1_0.ovrp_ShowUI(ui) == Bool.True; }
-	public static bool SetOverlayQuad(bool onTop, bool headLocked, IntPtr texture, IntPtr device, Posef pose, Vector3f scale)
+	public static bool SetOverlayQuad(bool onTop, bool headLocked, IntPtr texture, IntPtr device, Posef pose, Vector3f scale, int layerIndex=0)
 	{
+		if (version >= OVRP_1_6_0.version)
+		{
+			uint flags = (uint)OverlayFlag.None;
+			if (onTop)
+				flags |= (uint)OverlayFlag.OnTop;
+			if (headLocked)
+				flags |= (uint)OverlayFlag.HeadLocked;
+			
+			return OVRP_1_6_0.ovrp_SetOverlayQuad3(flags, texture, IntPtr.Zero, device, pose, scale, layerIndex) == Bool.True;
+		}
+
+		if (layerIndex != 0)
+			return false;
+		
 		if (version >= OVRP_0_1_1.version)
 			return OVRP_0_1_1.ovrp_SetOverlayQuad2(ToBool(onTop), ToBool(headLocked), texture, device, pose, scale) == Bool.True;
 		else
@@ -744,6 +827,66 @@ internal static class OVRPlugin
 			return OVRP_0_1_2.ovrp_SetControllerVibration(controllerMask, frequency, amplitude) == Bool.True;
 		else
 			return false;
+	}
+
+	public static HapticsDesc GetControllerHapticsDesc(uint controllerMask)
+	{
+		if (version >= OVRP_1_6_0.version)
+		{
+			return OVRP_1_6_0.ovrp_GetControllerHapticsDesc(controllerMask);
+		}
+		else
+		{
+			return new HapticsDesc();
+		}
+	}
+
+	public static HapticsState GetControllerHapticsState(uint controllerMask)
+	{
+		if (version >= OVRP_1_6_0.version)
+		{
+			return OVRP_1_6_0.ovrp_GetControllerHapticsState(controllerMask);
+		}
+		else
+		{
+			return new HapticsState();
+		}
+	}
+
+	public static bool SetControllerHaptics(uint controllerMask, HapticsBuffer hapticsBuffer)
+	{
+		if (version >= OVRP_1_6_0.version)
+		{
+			return OVRP_1_6_0.ovrp_SetControllerHaptics(controllerMask, hapticsBuffer) == Bool.True;
+		}
+		else
+		{
+			return false;
+		}
+	}
+
+	public static float GetEyeRecommendedResolutionScale()
+	{
+		if (version >= OVRP_1_6_0.version)
+		{
+			return OVRP_1_6_0.ovrp_GetEyeRecommendedResolutionScale();
+		}
+		else
+		{
+			return 1.0f;
+		}
+	}
+
+	public static float GetAppCpuStartToGpuEndTime()
+	{
+		if (version >= OVRP_1_6_0.version)
+		{
+			return OVRP_1_6_0.ovrp_GetAppCpuStartToGpuEndTime();
+		}
+		else
+		{
+			return 0.0f;
+		}
 	}
 
 #if OVR_LEGACY
@@ -1152,5 +1295,37 @@ internal static class OVRPlugin
 
 		[DllImport(pluginName, CallingConvention = CallingConvention.Cdecl)]
 		public static extern SystemRegion ovrp_GetSystemRegion();
+	}
+
+	private static class OVRP_1_6_0
+	{
+		public static readonly System.Version version = new System.Version(1, 6, 0);
+
+		[DllImport(pluginName, CallingConvention = CallingConvention.Cdecl)]
+		public static extern Bool ovrp_GetTrackingIPDEnabled();
+
+		[DllImport(pluginName, CallingConvention = CallingConvention.Cdecl)]
+		public static extern Bool ovrp_SetTrackingIPDEnabled(Bool value);
+
+		[DllImport(pluginName, CallingConvention = CallingConvention.Cdecl)]
+		public static extern HapticsDesc ovrp_GetControllerHapticsDesc(uint controllerMask);
+
+		[DllImport(pluginName, CallingConvention = CallingConvention.Cdecl)]
+		public static extern HapticsState ovrp_GetControllerHapticsState(uint controllerMask);
+
+		[DllImport(pluginName, CallingConvention = CallingConvention.Cdecl)]
+		public static extern Bool ovrp_SetControllerHaptics(uint controllerMask, HapticsBuffer hapticsBuffer);
+
+		[DllImport(pluginName, CallingConvention = CallingConvention.Cdecl)]
+		public static extern Bool ovrp_SetOverlayQuad3(uint flags, IntPtr textureLeft, IntPtr textureRight, IntPtr device, Posef pose, Vector3f scale, int layerIndex);
+
+		[DllImport(pluginName, CallingConvention = CallingConvention.Cdecl)]
+		public static extern float ovrp_GetEyeRecommendedResolutionScale();
+
+		[DllImport(pluginName, CallingConvention = CallingConvention.Cdecl)]
+		public static extern float ovrp_GetAppCpuStartToGpuEndTime();
+
+		[DllImport(pluginName, CallingConvention = CallingConvention.Cdecl)]
+		public static extern int ovrp_GetSystemRecommendedMSAALevel();
 	}
 }

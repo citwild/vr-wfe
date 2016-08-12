@@ -199,6 +199,14 @@ public class OVRDisplay
 		}
 	}
 
+	/// <summary>
+	/// Gets the recommended MSAA level for optimal quality/performance the current device.
+	/// </summary>
+	public int recommendedMSAALevel
+	{
+		get { return OVRPlugin.recommendedMSAALevel; }
+	}
+
 	private void UpdateTextures()
 	{
 		ConfigureEyeDesc(VR.VRNode.LeftEye);

@@ -326,6 +326,29 @@ public class OVRManager : MonoBehaviour
 	public bool queueAhead = true;
 
 	/// <summary>
+	/// If true, Unity will use the optimal antialiasing level for quality/performance on the current hardware.
+	/// </summary>
+	public bool useRecommendedMSAALevel = true;
+
+	/// <summary>
+	/// If true, dynamic resolution will be enabled
+	/// </summary>
+	public bool enableAdaptiveResolution = false;
+
+    /// <summary>
+    /// Max RenderScale the app can reach under adaptive resolution mode ( enableAdaptiveResolution = ture );
+    /// </summary>
+    [RangeAttribute(0.5f, 2.0f)]
+    public float maxRenderScale = 1.0f;
+
+    /// <summary>
+    /// Min RenderScale the app can reach under adaptive resolution mode ( enableAdaptiveResolution = ture );
+    /// </summary>
+    [RangeAttribute(0.5f, 2.0f)]
+
+    public float minRenderScale = 0.7f;
+
+	/// <summary>
 	/// The number of expected display frames per rendered frame.
 	/// </summary>
 	public int vsyncCount
@@ -484,9 +507,14 @@ public class OVRManager : MonoBehaviour
 	}
 
 	/// <summary>
-	/// If true, head tracking will affect the orientation of each OVRCameraRig's cameras.
+	/// If true, head tracking will affect the position of each OVRCameraRig's cameras.
 	/// </summary>
 	public bool usePositionTracking = true;
+
+	/// <summary>
+	/// If true, the distance between the user's eyes will affect the position of each OVRCameraRig's cameras.
+	/// </summary>
+	public bool useIPDInPositionTracking = true;
 
 	/// <summary>
 	/// If true, each scene load will cause the head pose to reset.
@@ -609,6 +637,8 @@ public class OVRManager : MonoBehaviour
 
 		tracker.isEnabled = usePositionTracking;
 
+		OVRPlugin.useIPDInPositionTracking = useIPDInPositionTracking;
+
 		// Dispatch HMD events.
 
 		isHmdPresent = OVRPlugin.hmdPresent;
@@ -616,6 +646,12 @@ public class OVRManager : MonoBehaviour
 		if (isHmdPresent)
 		{
 			OVRPlugin.queueAheadFraction = (queueAhead) ? 0.25f : 0f;
+		}
+
+		if (useRecommendedMSAALevel && QualitySettings.antiAliasing != display.recommendedMSAALevel)
+		{
+			QualitySettings.antiAliasing = display.recommendedMSAALevel;
+			Debug.Log ("MSAA level: " + QualitySettings.antiAliasing);
 		}
 
 		if (_wasHmdPresent && !isHmdPresent)
@@ -709,6 +745,29 @@ public class OVRManager : MonoBehaviour
 		}
 
 		_hadVrFocus = hasVrFocus;
+
+
+		// Changing effective rendering resolution dynamically according performance
+#if (UNITY_EDITOR_WIN || UNITY_STANDALONE_WIN) && UNITY_5 && !(UNITY_5_0 || UNITY_5_1 || UNITY_5_2 || UNITY_5_3)
+
+		if (enableAdaptiveResolution)
+		{
+            if (VR.VRSettings.renderScale < maxRenderScale)
+            {
+                // Allocate renderScale to max to avoid re-allocation
+                VR.VRSettings.renderScale = maxRenderScale;
+            }
+            else
+            {
+                // Adjusting maxRenderScale in case app started with a larger renderScale value
+                maxRenderScale = Mathf.Max(maxRenderScale, VR.VRSettings.renderScale);
+            }
+            float minViewportScale = minRenderScale / VR.VRSettings.renderScale;
+            float recommendedViewportScale = OVRPlugin.GetEyeRecommendedResolutionScale() / VR.VRSettings.renderScale;
+            recommendedViewportScale = Mathf.Clamp(recommendedViewportScale, minViewportScale, 1.0f);
+            VR.VRSettings.renderViewportScale = recommendedViewportScale;
+        }
+#endif
 
 		// Dispatch Audio Device events.
 
@@ -809,6 +868,11 @@ public class OVRManager : MonoBehaviour
 		display.Update();
 		OVRInput.Update();
     }
+
+	private void LateUpdate()
+	{
+		OVRHaptics.Process();
+	}
 
 	/// <summary>
 	/// Leaves the application/game and returns to the launcher/dashboard
